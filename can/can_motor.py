@@ -18,6 +18,7 @@ class Motor:
         self.motor_type = motor_type
         self.acc = acc
         self.dec = dec
+        self.set_mode = 10 # mode value placeholder, 10 is an invalid mode.
 
     def send_sdo(self, bus, index, subindex, data, command_specifier):
         """Send an SDO write command over CAN.
@@ -61,13 +62,31 @@ class Motor:
     def set_operation_mode(self, bus, mode):
         """Set the operation mode (e.g., 1=position, 3=speed, 4=torque)."""
         self.send_sdo(bus, 0x6060, 0x00, [mode], 0x2F)
+        self.set_mode = mode
         print(f"{self.motor_name} set to operation mode {mode}.")
 
     def set_target_speed(self, bus, rpm):
         """Set the target speed in RPM."""
+        if self.set_mode != 3:
+            print(f"Warning: {self.motor_name} is not in speed mode. Current mode: {self.set_mode}")
+            return
         speed_bytes = self.int32_to_bytes(rpm)
         self.send_sdo(bus, 0x60FF, 0x00, speed_bytes, 0x23)
         print(f"{self.motor_name} target speed set to {rpm} RPM.")
+    
+    def set_target_position(self, bus, position, speed = 2000):
+        """Set the target position in pulse? counts. Speed in RPM.
+        """
+        if self.set_mode != 1:
+            print(f"Warning: {self.motor_name} is not in position mode. Current mode: {self.set_mode}")
+            return
+        speed_bytes = self.int32_to_bytes(speed)
+        position_bytes = self.int32_to_bytes(position)
+        self.send_sdo(bus, 0x6081, 0x00, speed_bytes, 0x23)  # Set speed for position movement
+        self.send_sdo(bus, 0x607A, 0x00, position_bytes, 0x23)  # Set target position
+        self.send_sdo(bus, 0x6040, 0x00, [0x0F, 0x00], 0x2B)  # Start movement
+        self.send_sdo(bus, 0x6040, 0x00, [0x1F, 0x00], 0x2B)  
+        print(f"{self.motor_name} target position set to {position} counts at speed {speed} RPM.")
 
     def fault_reset(self, bus):
         """Send fault reset command."""
