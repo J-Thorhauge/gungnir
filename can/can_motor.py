@@ -6,7 +6,7 @@ class Motor:
         """Initialize the motor with an ID and type.
         Args:
             motor_name (str): Convinient human-friendly name.
-            motor_id (int): Unique CAN id for the motor. Convention is 101 for motor 1, 102 for motor 2, etc.
+            motor_id (int): Unique CAN id for the motor. Convention for Gungir is 101 for motor 1, 102 for motor 2, etc.
             motor_type (str): Type of the motor 'small' for the coolass steppers or 'big' for MyActuator Motors.
             Then it sets up the CAN tx and rx ids according to the datasheet.
             Acceleration and deceleration are in units of rps/s.
