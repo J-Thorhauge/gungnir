@@ -22,7 +22,7 @@ class Motor:
 
     def send_sdo(self, bus, index, subindex, data, command_specifier):
         """Send an SDO write command over CAN.
-        Here is the structure of an SDO write message:
+        Here is the structure of an SDO write message: tak til ascii table generator
         +======================+==========================+=============+=========+===========+===================+
         | Example instruction  | Node id 0x600 + motor_id | Data length |  Index  | Sub-index |    Data bytes     |
         +======================+==========================+=============+====+====+===========+====+====+====+====+
@@ -34,7 +34,7 @@ class Motor:
         data_bytes += [0x00] * (8 - len(data_bytes))  # Pad to 8 bytes
         msg = can.Message(arbitration_id=self.tx_id, data=data_bytes, is_extended_id=False)
         bus.send(msg)
-        time.sleep(0.05)
+        time.sleep(0.05) # vi skal lige finde ud af hvor lang tid man skal vente egentlig
 
     def receive_sdo(self, bus, timeout=1.0):
         """Receive a response from the motor. /maybe/"""
@@ -98,17 +98,34 @@ class Motor:
         self.send_sdo(bus, 0x6040, 0x00, [0x0F, 0x00], 0x2B)  # Start movement
         self.send_sdo(bus, 0x6040, 0x00, [0x1F, 0x00], 0x2B)  
         print(f"{self.motor_name} target position set to {position} counts at speed {speed} RPM.")
+
+    def stop_motor(self, bus):
+        """Stop the motor smoothly with 605Ah using 6085h (1000 rps/s)deceleration."""
+        self.send_sdo(bus, 0x6040, 0x00, [0x02, 0x00], 0x2B)
+        print(f"{self.motor_name} stopping motor.")
     
     def read_position(self, bus):
         """Read the current position from the motor."""
-        self.send_sdo(bus, 0x6064, 0x00, [], 0x40)  # Request current position
+        self.send_sdo(bus, 0x6064, 0x00, [], 0x40)
         response = self.receive_sdo(bus)
         if response:
             position = int.from_bytes(response[4:8], byteorder='little', signed=True)
-            print(f"{self.motor_name} current position: {position} counts.")
+            print(f"{self.motor_name} current position: {position} counts/pulses.")
             return position
         else:
             print(f"Failed to read position from {self.motor_name}.")
+            return None
+        
+    def read_speed(self, bus):
+        """Read the current speed from the motor."""
+        self.send_sdo(bus, 0x606C, 0x00, [], 0x40)
+        response = self.receive_sdo(bus)
+        if response:
+            speed = int.from_bytes(response[4:8], byteorder='little', signed=True)
+            print(f"{self.motor_name} current speed: {speed} RPM.")
+            return speed
+        else:
+            print(f"Failed to read speed from {self.motor_name}.")
             return None
 
     def fault_reset(self, bus):
