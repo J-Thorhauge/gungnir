@@ -2,11 +2,11 @@ import can
 import time
 
 class Motor:
-    def __init__(self, motor_name, motor_id, motor_type, acc = 10, dec = 10):
+    def __init__(self, motor_name, motor_id, motor_type, acc = 100, dec = 100):
         """Initialize the motor with an ID and type.
         Args:
-            motor_name (str): Convinient human-friendly name.
-            motor_id (int): Unique CAN id for the motor. Convention for Gungir is 101 for motor 1, 102 for motor 2, etc.
+            motor_name (str): Convinient human-friendly name. Eg. Joint 1
+            motor_id (int): Unique CAN id for the motor. Convention for Gungir is 101 for joint 1, 102 for joint 2, etc.
             motor_type (str): Type of the motor 'small' for the coolass steppers or 'big' for MyActuator Motors.
             Then it sets up the CAN tx and rx ids according to the datasheet.
             Acceleration and deceleration are in units of rps/s.
@@ -19,6 +19,7 @@ class Motor:
         self.acc = acc
         self.dec = dec
         self.set_mode = 10 # mode value placeholder, 10 is an invalid mode.
+        self.rx_buffer = []  # Buffer for incoming CAN messages
 
     def send_sdo(self, bus, index, subindex, data, command_specifier):
         """Send an SDO write command over CAN.
@@ -34,15 +35,24 @@ class Motor:
         data_bytes += [0x00] * (8 - len(data_bytes))  # Pad to 8 bytes
         msg = can.Message(arbitration_id=self.tx_id, data=data_bytes, is_extended_id=False)
         bus.send(msg)
-        time.sleep(0.05) # vi skal lige finde ud af hvor lang tid man skal vente egentlig
+        time.sleep(0.0) # vi skal lige finde ud af hvor lang tid man skal vente egentlig
 
-    def receive_sdo(self, bus, timeout=1.0):
-        """Receive a response from the motor. /maybe/"""
+    def receive_sdo(self, bus, timeout=0.01):
+        """Receive a response from the motor using the rx buffer. /maybe/ kig på om timeout er nødvendigt"""
         start_time = time.time()
         while True:
+            # Check buffer first
+            if self.rx_buffer:
+                return self.rx_buffer.pop(0).data
+            
+            # Try to receive a new message
             message = bus.recv(timeout)
             if message and message.arbitration_id == self.rx_id:
                 return message.data
+            elif message and message.arbitration_id not in [self.rx_id]:
+                # Buffer messages not for this motor
+                self.rx_buffer.append(message)
+            
             if time.time() - start_time > timeout:
                 print(f"Timeout waiting for SDO response from {self.motor_name}.")
                 return None
@@ -132,4 +142,21 @@ class Motor:
         """Send fault reset command."""
         self.send_sdo(bus, 0x6040, 0x00, [0x80, 0x00], 0x2B)
 
+    def test_method(self, bus, position, speed = 2000):
+        speed_bytes = self.int32_to_bytes(speed)
+        position_bytes = self.int32_to_bytes(position)
+        acc_bytes = self.int32_to_bytes(self.acc*10)
+        dec_bytes = self.int32_to_bytes(self.dec*10)
+
+        self.send_sdo(bus, 0x6040, 0x00, [0x06, 0x00], 0x2B)  # Shutdown
+        self.send_sdo(bus, 0x6040, 0x00, [0x07, 0x00], 0x2B)  # Switch on
+        self.send_sdo(bus, 0x6040, 0x00, [0x0F, 0x00], 0x2B)  # Enable operation
+        self.send_sdo(bus, 0x6060, 0x00, [1], 0x2F)
+        self.send_sdo(bus, 0x6081, 0x00, speed_bytes, 0x23)  # Set speed for position movement
+        self.send_sdo(bus, 0x6083, 0x00, acc_bytes, 0x23)  # Acceleration
+        self.send_sdo(bus, 0x6084, 0x00, dec_bytes, 0x23)
+        self.send_sdo(bus, 0x607A, 0x00, position_bytes, 0x23)  # Set target position
+        self.send_sdo(bus, 0x6040, 0x00, [0x0F, 0x00], 0x2B)  # Start movement
+        self.send_sdo(bus, 0x6040, 0x00, [0x1F, 0x00], 0x2B)  
+        print(f"{self.motor_name} target position set to {position} counts at speed {speed} RPM.")
     
