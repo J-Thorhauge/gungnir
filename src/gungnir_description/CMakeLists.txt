@@ -7,7 +7,7 @@ find_package(ament_cmake REQUIRED)
 find_package(pluginlib REQUIRED)
 
 install(
-  DIRECTORY config meshes urdf
+  DIRECTORY config meshes srdf urdf
   DESTINATION share/${PROJECT_NAME}
 )
 
