@@ -20,6 +20,8 @@ class Motor:
         self.dec = dec
         self.set_mode = 10 # mode value placeholder, 10 is an invalid mode.
         self.rx_buffer = []  # Buffer for incoming CAN messages
+        self.speed = 0
+        self.position = 0
 
     def send_sdo(self, bus, index, subindex, data, command_specifier):
         """Send an SDO write command over CAN.
@@ -37,25 +39,24 @@ class Motor:
         bus.send(msg)
         time.sleep(0.0) # vi skal lige finde ud af hvor lang tid man skal vente egentlig
 
-    def receive_sdo(self, bus, timeout=0.01):
+    def receive_sdo(self, bus):
         """Receive a response from the motor using the rx buffer. /maybe/ kig på om timeout er nødvendigt"""
-        start_time = time.time()
-        while True:
-            # Check buffer first
-            if self.rx_buffer:
-                return self.rx_buffer.pop(0).data
-            
-            # Try to receive a new message
-            message = bus.recv(timeout)
-            if message and message.arbitration_id == self.rx_id:
-                return message.data
-            elif message and message.arbitration_id not in [self.rx_id]:
-                # Buffer messages not for this motor
-                self.rx_buffer.append(message)
-            
-            if time.time() - start_time > timeout:
-                print(f"Timeout waiting for SDO response from {self.motor_name}.")
-                return None
+        try:
+            print("Listening for CAN messages on")
+            while True:
+                # Read a message from the CAN bus
+                message = bus.recv()
+
+                if message is not None:
+                        print(f"Received: {message}")
+
+                if message and message.arbitration_id == self.rx_id:
+
+                    if message is not None:
+                        print(f"Received: {message} lol")
+
+        except can.CanError as e:
+            print(f"CAN error: {e}")
     
     def int32_to_bytes(self, value):
         """Convert a signed 32-bit integer to a 4-byte little-endian list."""
@@ -117,26 +118,38 @@ class Motor:
     def read_position(self, bus):
         """Read the current position from the motor."""
         self.send_sdo(bus, 0x6064, 0x00, [], 0x40)
-        response = self.receive_sdo(bus)
+        """ response = self.receive_sdo(bus)
         if response:
             position = int.from_bytes(response[4:8], byteorder='little', signed=True)
             print(f"{self.motor_name} current position: {position} counts/pulses.")
             return position
         else:
             print(f"Failed to read position from {self.motor_name}.")
-            return None
+            return None """
         
     def read_speed(self, bus):
         """Read the current speed from the motor."""
         self.send_sdo(bus, 0x606C, 0x00, [], 0x40)
-        response = self.receive_sdo(bus)
+        """ response = self.receive_sdo(bus)
         if response:
             speed = int.from_bytes(response[4:8], byteorder='little', signed=True)
             print(f"{self.motor_name} current speed: {speed} RPM.")
             return speed
         else:
             print(f"Failed to read speed from {self.motor_name}.")
-            return None
+            return None """
+    
+    def read_mode(self, bus):
+        """Read the current operation mode from the motor."""
+        self.send_sdo(bus, 0x6061, 0x00, [], 0x40)
+        """ response = self.receive_sdo(bus)
+        if response:
+            mode = response[4]
+            print(f"{self.motor_name} current operation mode: {mode}.")
+            return mode
+        else:
+            print(f"Failed to read operation mode from {self.motor_name}.")
+            return None """
 
     def fault_reset(self, bus):
         """Send fault reset command."""
