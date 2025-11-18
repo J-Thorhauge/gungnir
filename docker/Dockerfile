@@ -27,8 +27,7 @@ RUN apt-get update && apt-get install -y \
 # Install Interfaces
 RUN apt-get update && apt-get install -y python3-pip && \
   pip3 install \
-    canopen \
-    Jetson.GPIO
+  canopen
 
 # Install Zenoh for better ros2 network performance
 RUN apt-get update && apt-get install -y ros-humble-rmw-zenoh-cpp
