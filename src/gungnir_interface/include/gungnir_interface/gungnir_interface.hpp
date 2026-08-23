@@ -18,6 +18,7 @@
 #include "string"
 #include "unordered_map"
 #include "vector"
+#include "rclcpp/rclcpp.hpp"
 
 #include "hardware_interface/handle.hpp"
 #include "hardware_interface/hardware_info.hpp"
@@ -55,16 +56,72 @@ public:
 
   return_type write(const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/) override;
 
+  int homing_sequence(besfoc::CanMotor& motor);
+
+  void retract_motor(besfoc::CanMotor& motor){
+    motor.set_acceleration(10000); // Set acceleration to 1000 rpm/s
+    motor.set_deceleration(10000); // Set deceleration to 1000 rpm
+
+    motor.set_velocity(1000); // Set velocity to 1000
+
+    rclcpp::sleep_for(std::chrono::milliseconds(200)); // Wait for 1 second
+
+    motor.stop_motor(); // Stop the motor
+  }
+  void go_to_stop(besfoc::CanMotor& motor, int torque){
+   int last_velocity = 0;
+    int velocity;
+    int hits = 0;
+
+    motor.set_tourque(-torque);
+    rclcpp::sleep_for(std::chrono::milliseconds(500));
+    motor.get_velocity(velocity);
+    last_velocity = velocity;
+
+    while(true){
+
+        motor.get_velocity(velocity);
+        int vel_diff = abs(last_velocity) - abs(velocity);
+
+        RCLCPP_INFO(rclcpp::get_logger("test_node"), "Vel Diff: %d, Hits: %d", vel_diff, hits);
+        
+        if(vel_diff > 30){
+            break;
+        }
+        last_velocity = velocity;
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    RCLCPP_INFO(rclcpp::get_logger("test_node"), "Motor has stopped. Current Velocity: %d", velocity);
+
+    motor.stop_motor(); // Stop the motor
+}
+
 protected:
 
   const int BESFOC_1_CAN_ID = 0x65; // Numeric value: 101
-  const int BESFOC_1_GEAR_RATIO = 20*5.14; // Gear ratio for joint 4 (20:1 gearbox and 5.14:1 belt reduction)
+  const int BESFOC_1_GEAR_RATIO = 50*5.14; // Gear ratio for joint 1 (20:1 gearbox and 5.14:1 belt reduction)
   const int AMT21_1_NODE_ADDRESS = 0x54;
 
   const int MYACTUATOR_2_CAN_ID = 0x02;
   const int MYACTUATOR_3_CAN_ID = 0x03;
 
   const int BESFOC_4_CAN_ID = 0x68; // Numeric value: 104
+  const int BESFOC_4_GEAR_RATIO = 20*2.86; // Gear ratio for joint 4 (50:1 gearbox)
+  const int BESFOC_4_CPR = 1000; // Counts per revolution for joint 4 (50000 CPR)
+
+  const int MYACTUATOR_5_CAN_ID = 0x05;
+  const int MYACTUATOR_5_GEAR_RATIO = 1;
+  const int MYACTUATOR_MAX_VELOCITY = 498; // Max velocity for MyActuator motors in degrees/s
+  const int AMT21_5_NODE_ADDRESS = 0x58;
+
+  const int MYACTUATOR_6_CAN_ID = 0x06;
+  const int MYACTUATOR_6_GEAR_RATIO = 1;
+  const int MYACTUATOR_6_MAX_VELOCITY = 498; // Max velocity for MyActuator motors in degrees/s
+  const int AMT21_6_NODE_ADDRESS = 0x5C;
+
+
+  const bool joint4_is_homed = false; // Set to true if joint 4 is homed, false otherwise
 
   //Create hardware maps for the motors and encoders. The keys are the joint numbers (starting at 0) and the values are the corresponding motor/encoder objects
   map<int, besfoc::CanMotor> besfoc_motors;

@@ -45,12 +45,12 @@ int main(int argc, char ** argv)
 
   trajectory_msgs::msg::JointTrajectory trajectory_msg;
   trajectory_msg.header.stamp = node->now();
-  trajectory_msg.joint_names = {"joint_1", "joint_2", "joint_3"};
+  trajectory_msg.joint_names = {"joint_1", "joint_2", "joint_3", "joint_4"};
 
   // Gentle 3-DoF profile: hold -> move slowly -> return slowly.
-  trajectory_msg.points.push_back(make_point({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, 0));
-  trajectory_msg.points.push_back(make_point({0.2, -0.2, -0.4}, {0.0, 0.0, 0.0}, 3));
-  trajectory_msg.points.push_back(make_point({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, 6));
+  trajectory_msg.points.push_back(make_point({0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}, 0));
+  trajectory_msg.points.push_back(make_point({0.2, -0.2, -0.4, 0.8}, {0.0, 0.0, 0.0, 0.0}, 3));
+  trajectory_msg.points.push_back(make_point({0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}, 6));
 
   auto started = node->now();
   while (pub->get_subscription_count() == 0)

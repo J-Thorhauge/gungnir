@@ -35,17 +35,18 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
   besfoc_bus->connect();
 
   my_actuator_bus = new myactuator_rmd::CanDriver("can0");
-
    //Add the motors and encoders to the hardware maps
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing motors and encoders...");
 
-  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 2");
   
   //Joint 2 motor(MyActuator RMD)
+  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 2");
   auto [rmd_it_2, rmd_inserted_2] = rmd_motors.emplace(1, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_2_CAN_ID));
   rmd_it_2->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_ACCELERATION);
   rmd_it_2->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_DECELERATION);
 
+
+  //Joint 3 motor(MyActuator RMD)
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 3");
   //Joint 3 motor(MyActuator RMD)
   auto [rmd_it_3, rmd_inserted_3] = rmd_motors.emplace(2, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_3_CAN_ID));
@@ -55,6 +56,7 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing BesFoc motor and AMT21 encoder for joint 1...");
 
   //Joint 1 motor and encoder(BesFoc and AMT21)
+  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing BesFoc motor and AMT21 encoder for joint 1...");
   auto [besfoc_it, besfoc_inserted] = besfoc_motors.emplace(0, besfoc::CanMotor(BESFOC_1_CAN_ID, besfoc_bus));
   (void)besfoc_inserted;
   besfoc_it->second.set_acceleration(10000); // Set acceleration to 1000 rpm/s
@@ -65,9 +67,21 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
   auto encoder_it = amt21_encoders.find(0);
   encoder_it->second.setZero(); // Reset encoder at address 0x54
 
+
+  //Joint 4 motor, no encoder(BesFoc)
+  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing BesFoc motor for joint 4...");
+  auto [besfoc_it_4, besfoc_inserted_4] = besfoc_motors.emplace(3, besfoc::CanMotor(BESFOC_4_CAN_ID, besfoc_bus));
+  (void)besfoc_inserted_4;
+  besfoc_it_4->second.set_acceleration(10000); // Set acceleration to 1000 rpm/s
+  besfoc_it_4->second.set_deceleration(10000); // Set deceleration to 1000 rpm/s
+  besfoc_it_4->second.set_mode(besfoc::SPEED_MODE); // Set mode to velocity control
+
+  besfoc_it_4->second.set_zero_position(); // Reset position to zero for joint 4
+
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Motors and encoders initialized successfully.");
 
-  // // robot has 6 joints and 2 interfaces
+  homing_sequence(besfoc_it_4->second); // Perform homing sequence for joint 4
+
   joint_position_.assign(6, 0);
   joint_velocities_.assign(6, 0);
   joint_velocities_command_.assign(6, 0);
@@ -99,6 +113,99 @@ hardware_interface::CallbackReturn RobotSystem::on_deactivate(const rclcpp_lifec
 
   return CallbackReturn::SUCCESS;
 }
+
+int RobotSystem::homing_sequence(besfoc::CanMotor& motor){
+    const int POS_TOLERANCE = 100; // Define a position tolerance for homing
+    const int MAX_HITS = 4; // Define the number of consecutive hits required to confirm homing
+
+    int velocity;
+    int torque = 80;
+
+    int hits = 0;
+
+    vector<int> positions = {};
+    int current_position;
+    int home_position;
+
+    motor.set_zero_position();
+    motor.set_tourque_slope(-1000); // Set velocity to 1000
+    motor.set_tourque_speed_limit(1000); // Set velocity to 1000
+    motor.set_tourque(-torque); // Set velocity to 1000
+
+    RCLCPP_INFO(rclcpp::get_logger("test_node"), "Starting homing sequence. Torque windup in progress...");
+    while(abs(velocity) < 30)
+    {
+        torque++;
+        motor.set_tourque(-torque); // Set velocity to 1000
+        
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+        motor.get_velocity(velocity);
+        
+    }
+
+    RCLCPP_INFO(rclcpp::get_logger("test_node"), "Torque windup complete. Torque set to: %d", torque);
+    RCLCPP_INFO(rclcpp::get_logger("test_node"), "Starting homing sequence.");
+    for(int i = 0; i < MAX_HITS; i++)
+    {
+        go_to_stop(motor, torque);
+
+        RCLCPP_INFO(rclcpp::get_logger("test_node"), "Position hit %d/%d. Checking if motor postition...", i + 1, MAX_HITS);
+        rclcpp::sleep_for(std::chrono::milliseconds(100)); // Wait for 1 second
+
+        motor.get_position(current_position);
+
+        if(positions.size() == 0){
+            positions.push_back(current_position);
+            retract_motor(motor);
+            continue;
+        }
+
+        int postion_total = accumulate(positions.begin(), positions.end(), 0);
+        int size = positions.size();
+        int avg_position = postion_total / size;
+        int pos_diff = abs(abs(current_position) - abs(avg_position));
+        RCLCPP_INFO(rclcpp::get_logger("test_node"), "Pos Diff: %d, size: %d, total: %d Current Position: %d, Average Position: %d", pos_diff, size, postion_total, current_position, avg_position);
+
+    
+        if(abs(abs(current_position) - abs(avg_position)) > POS_TOLERANCE)
+        {
+            RCLCPP_INFO(rclcpp::get_logger("test_node"), "Motor position not stable. Resetting hit count.");
+            i = -1; // Reset hit count
+            positions.clear(); // Clear recorded positions
+        }
+
+        positions.push_back(current_position);
+        RCLCPP_INFO(rclcpp::get_logger("test_node"), "Motor position stable. Recorded position: %d", current_position);
+        retract_motor(motor);
+    }
+
+    int postion_total = accumulate(positions.begin(), positions.end(), 0);
+    int size = positions.size();
+    home_position = postion_total / size;
+
+
+    bool at_target = false;
+    motor.set_position_absolute(home_position, 1000); // Move to home position
+
+    while(at_target == false) {
+        motor.at_postion_target(at_target);
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+    }
+    RCLCPP_INFO(rclcpp::get_logger("test_node"), "Homing sequence completed. Home position established at: %d", home_position);
+
+    at_target = false;
+    motor.set_position_relative((BESFOC_4_CPR*BESFOC_4_GEAR_RATIO)/2, 1000); // Move to home position
+
+    while(at_target == false) {
+        motor.at_postion_target(at_target);
+        rclcpp::sleep_for(std::chrono::milliseconds(10));
+    }
+    
+    motor.set_zero_position(); // Reset position to zero for joint 4
+
+    return 0;
+}
+
 
 std::vector<hardware_interface::StateInterface> RobotSystem::export_state_interfaces()
 {
@@ -145,6 +252,7 @@ return_type RobotSystem::read(const rclcpp::Time & /*time*/, const rclcpp::Durat
    
     auto encoder_it = amt21_encoders.find(i);
     auto my_actuator_it = rmd_motors.find(i);
+    auto besfoc_it = besfoc_motors.find(i);
 
     if(encoder_it != amt21_encoders.end()) {
      
@@ -163,6 +271,28 @@ return_type RobotSystem::read(const rclcpp::Time & /*time*/, const rclcpp::Durat
       double velocity = (position - joint_position_[i]) / period.seconds(); // Calculate velocity based on change in position over time
 
       RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Read position and velocity from MyActuator for joint %zu: %f (position), %f (velocity)", i, position, velocity);
+      
+      joint_position_[i] = position;
+      joint_velocities_[i] = velocity;
+
+    }else if(besfoc_it != besfoc_motors.end()) {
+      // Update joint_position_ and joint_velocities_ from the BesFoc motor state
+      double velocity;
+      int rpm;
+      double position;
+      int raw_position;
+
+      besfoc_it->second.get_velocity(rpm); // Get velocity in rpm
+      velocity = static_cast<double>(rpm) * (2.0 * M_PI) / (60.0 * BESFOC_4_GEAR_RATIO); // Convert rpm to rad/s
+
+      besfoc_it->second.get_position(raw_position); // Get position in raw units
+      position = static_cast<double>(raw_position) * (2.0 * M_PI) / (BESFOC_4_CPR*BESFOC_4_GEAR_RATIO); // Convert raw position to radians    
+
+      // Set postion from 0 to 2pi to -pi to pi
+      if (position > M_PI) {
+        position -= 2.0 * M_PI;
+      }
+      RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Read velocity from BesFoc for joint %zu: %f (velocity), estimated position: %f", i, velocity, position);
       
       joint_position_[i] = position;
       joint_velocities_[i] = velocity;
@@ -187,9 +317,10 @@ return_type RobotSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
     auto besfoc_it = besfoc_motors.find(i);
     auto my_actuator_it = rmd_motors.find(i);
     if(besfoc_it != besfoc_motors.end()) {
+      int gear_ratio = (i == 0) ? BESFOC_1_GEAR_RATIO : BESFOC_4_GEAR_RATIO; // Use the appropriate gear ratio for joint 1 or joint 4
       // Send velocity command to the BesFoc motor
       double velocity_command = joint_velocities_command_[i];
-      int rpm_command = static_cast<int>(velocity_command * 60.0 * BESFOC_1_GEAR_RATIO/ (2.0 * M_PI)); // Convert rad/s to rpm at the motor shaft
+      int rpm_command = static_cast<int>(velocity_command * 60.0 * gear_ratio/ (2.0 * M_PI)); // Convert rad/s to rpm at the motor shaft
 
       RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Sending velocity commandf to motor for joint %zu: %d rpm", i, rpm_command);
       besfoc_it->second.set_velocity(static_cast<int>(rpm_command));

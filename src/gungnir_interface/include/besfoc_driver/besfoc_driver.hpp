@@ -22,10 +22,12 @@ namespace besfoc
 
     const int POSITION_MODE = 1;
     const int SPEED_MODE = 3;
+    const int TORQUE_MODE = 4;
 
     const map<int, string> mode_dict = {
         {POSITION_MODE, "Position Mode"},
-        {SPEED_MODE, "Speed Mode"}
+        {SPEED_MODE, "Speed Mode"},
+        {TORQUE_MODE, "Torque Mode"}
     };
 
     const int WRITE_BYTES_1 = 0x2F;
@@ -65,8 +67,6 @@ namespace besfoc
         {STATE_UNKNOWN, "Unknown"}
     };
 
-    //TODO: 1 - Add Reads, 2 - Set New Zero 3 - Class Variables for state
-
     class CanMotor
     {
         public:
@@ -85,8 +85,16 @@ namespace besfoc
 
             void get_position(int &position); 
 
+            void set_tourque_slope(int16_t slope);
+            void set_tourque_speed_limit(int limit);
+            void set_tourque(int16_t torque);
+            
+            void get_tourque(int &torque);
+
             void set_acceleration(int acceleration);
             void set_deceleration(int deceleration);
+
+            void at_postion_target(bool &at_target);
 
             void initialize_motor();
             void get_mode(int &mode);
@@ -95,13 +103,13 @@ namespace besfoc
             void reset_fault();
 
             void get_status(int& motor_status);
+            void get_status(int& motor_status, int32_t& status_word);
 
+            void disable_motor();
+            void reinitialize_motor();
             void shutdown();//Not made yet
 
-            void stop();
         private:
-            
-            
             void to_bytes(int8_t value, vector<int>& bytes);
             void to_bytes(int16_t value, vector<int>& bytes);
             void to_bytes(int32_t value, vector<int>& bytes);
@@ -115,8 +123,13 @@ namespace besfoc
             bool check_response(array<int, 2>& index, int& subindex, int timeout_ms=1000);
             bool check_response(array<int, 2>& index, int& subindex, int32_t& data_out, int timeout_ms=1000);
             
+            
+
             int tx_can_id_;
             int rx_can_id_;
+
+            int acc;
+            int dec;
 
             bool initialized;
             std::shared_ptr<CanBus> bus_;

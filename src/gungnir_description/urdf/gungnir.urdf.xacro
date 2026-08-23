@@ -5,6 +5,7 @@
 
   <!-- helper macro -->
   <xacro:include filename="$(find gungnir_description)/urdf/inc/create_link.xacro"/>
+  <xacro:include filename="$(find gungnir_description)/urdf/inc/create_link_no_mesh.xacro"/>
 
   <xacro:create_link
       link_name="base_link"
@@ -37,13 +38,13 @@
       mesh_package="gungnir_description"
       mesh_name="link_3"
   />
-<!-- 
-  <xacro:create_link
+
+  <xacro:create_link_no_mesh
       link_name="link_4"
-      xyz_offset="0 0 0.077"
+      xyz_offset="0 0 -.2"
       rpy_offset="0 0 0"
   />
-
+<!-- 
   <xacro:create_link
       link_name="link_5"
       xyz_offset="0 0 0.113"
@@ -97,16 +98,15 @@
     <limit effort="1000.0" lower="${-pi}" upper="${pi}" velocity="2.5"/>
   </joint>
 
-  <!-- 
-
   <joint name="joint_4" type="revolute">
     <parent link="link_3"/>
     <child link="link_4"/>
-    <origin xyz="0.519 0 0" rpy="0 ${pi} ${pi}"/>
+    <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="1000.0" lower="${-pi}" upper="${pi}" velocity="2.5"/>
   </joint>
 
+  <!-- 
   <joint name="joint_5" type="revolute">
     <parent link="link_4"/>
     <child link="link_5"/>

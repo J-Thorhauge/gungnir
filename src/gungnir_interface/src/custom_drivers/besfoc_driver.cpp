@@ -36,6 +36,7 @@ const std::map<int, int> besfoc::data_length_dict = {
     {besfoc::WRITE_BYTES_2, 2},
     {besfoc::WRITE_BYTES_3, 3},
     {besfoc::WRITE_BYTES_4, 4},
+    {besfoc::READ_BYTES, 0},
     {besfoc::READ_RESPONSE_BYTES_1, 1},
     {besfoc::READ_RESPONSE_BYTES_2, 2},
     {besfoc::READ_RESPONSE_BYTES_3, 3},
@@ -222,6 +223,24 @@ void besfoc::CanMotor::initialize_motor() {
     initialized = true;
 }
 
+void besfoc::CanMotor::disable_motor() {
+
+    if(!initialized) {
+        return;
+    }
+
+    //Make sure the motor is in quick stop state.
+    int state;
+    get_status(state);
+    if(state != STATE_QUICK_STOP_ACTIVE) {
+        stop_motor();
+    }
+
+    send_can_write_command({0x60, 0x40}, 0x00, {0x00, 0x0F}, WRITE_BYTES_2); // Motor Release
+    send_can_write_command({0x60, 0x40}, 0x00, {0x00, 0x07}, WRITE_BYTES_2); // Motor Ready
+    initialized = false;
+}
+
 void besfoc::CanMotor::get_status(int& motor_status) {
     int32_t status;
 
@@ -253,6 +272,42 @@ void besfoc::CanMotor::get_status(int& motor_status) {
     }
 }
 
+
+void besfoc::CanMotor::get_status(int& motor_status, int32_t& status_word) {
+    int32_t status;
+
+    if(send_can_read_command({0x60, 0x41}, 0x00, {0x00, 0x00}, status)){
+
+       // Extract relevant bits per CIA402 protocol
+        uint16_t state_bits = status & 0xFF;  // Bits 0-7 determine the state
+        
+        // Decode CIA402 state machine (Table from manual)
+        if ((state_bits & 0x4F) == 0x00) {           // 0XX 0000
+            motor_status = 0; // Not Ready To Switch On
+        } else if ((state_bits & 0x4F) == 0x40) {   // 1XX 0000
+            motor_status = 1; // Switch On Disabled
+        } else if ((state_bits & 0x6F) == 0x21) {   // 01X 0001
+            motor_status = 2; // Ready To Switch On
+        } else if ((state_bits & 0x6F) == 0x23) {   // 01X 0011
+            motor_status = 3; // Switched On
+        } else if ((state_bits & 0x6F) == 0x27) {   // 01X 0111
+            motor_status = 4; // Operation Enabled
+        } else if ((state_bits & 0x4F) == 0x07) {   // 00X 0111
+            motor_status = 5; // Quick Stop Active
+        } else if ((state_bits & 0x4F) == 0x0F) {   // 0XX 1111
+            motor_status = 6; // Fault Reaction Active
+        } else if ((state_bits & 0x4F) == 0x08) {   // 0XX 1000
+            motor_status = 7; // Fault
+        } else {
+            motor_status = -1; // Unknown state
+        }
+
+        status_word = status; // Return the full status word        
+    }
+}
+
+
+
 void besfoc::CanMotor::get_mode(int &mode) {
 
     if(initialized){
@@ -260,25 +315,90 @@ void besfoc::CanMotor::get_mode(int &mode) {
     }
 
     send_can_read_command({0x60, 0x61}, 0x00, {0x00, 0x00}, mode);
-    cout << "Current Mode(Local): " << mode << endl;
 }
 
 void besfoc::CanMotor::set_mode(int mode) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    int current_mode;
+    get_mode(current_mode);
+
+    if(current_mode == besfoc::TORQUE_MODE) {
+        reinitialize_motor(); // Disable torque mode before switching to speed mode
+    }
+
     send_can_write_command({0x60, 0x60}, 0x00, {static_cast<int>(mode)}, WRITE_BYTES_1);
 }
 
 void besfoc::CanMotor::get_velocity(int& velocity) {
-    if(initialized){
+    if(!initialized){
         initialize_motor();
     }
 
-    send_can_read_command({0x60, 0x63}, 0x00, {0x00, 0x00}, velocity);
+    send_can_read_command({0x60, 0x6C}, 0x00, {0x00, 0x00}, velocity);
+}
+
+void besfoc::CanMotor::set_tourque_slope(int16_t slope) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    vector<int> data;
+    to_bytes(slope, data);
+    send_can_write_command({0x60, 0x87}, 0x00, data, WRITE_BYTES_2);
+}
+
+void besfoc::CanMotor::set_tourque_speed_limit(int limit) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    vector<int> data;
+    to_bytes(limit, data);
+    send_can_write_command({0x60, 0xFF}, 0x00, data, WRITE_BYTES_4);
+}
+
+void besfoc::CanMotor::set_tourque(int16_t torque) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    int mode;
+    get_mode(mode);
+    if(mode != besfoc::TORQUE_MODE) {
+        set_mode(besfoc::TORQUE_MODE);
+    }
+
+    vector<int> data;
+    to_bytes(torque, data);
+    send_can_write_command({0x60, 0x71}, 0x00, data, WRITE_BYTES_2);
+}
+
+void besfoc::CanMotor::at_postion_target(bool &at_target) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    int status;
+    int32_t status_word;
+    get_status(status, status_word);
+
+    // Check bit 10 of the status word to determine if the motor is at the target position
+    at_target = (status_word & (1 << 10)) != 0;    
 }
 
 
 void besfoc::CanMotor::set_velocity(int velocity) {
     if(!initialized){
         initialize_motor();
+    }
+    
+    int mode;
+    get_mode(mode);
+    if(mode != besfoc::SPEED_MODE) {
+        set_mode(besfoc::SPEED_MODE);
     }
 
     if(abs(velocity) > 6000) {
@@ -291,12 +411,11 @@ void besfoc::CanMotor::set_velocity(int velocity) {
 }
 
 void besfoc::CanMotor::get_position(int &position) {
-
-    if(initialized){
+    if(!initialized){
         initialize_motor();
     }
 
-    send_can_read_command({0x60, 0x6C}, 0x00, {0x00, 0x00}, position);
+    send_can_read_command({0x60, 0x64}, 0x00, {0x00, 0x00}, position);
 }
 
 void besfoc::CanMotor::set_position_relative(int position, int velocity) {
@@ -305,6 +424,12 @@ void besfoc::CanMotor::set_position_relative(int position, int velocity) {
 
     if(!initialized){
         initialize_motor();
+    }
+
+    int mode;
+    get_mode(mode);
+    if(mode != besfoc::POSITION_MODE) {
+        set_mode(besfoc::POSITION_MODE);
     }
 
     to_bytes(position, posData);
@@ -328,6 +453,18 @@ void besfoc::CanMotor::set_position_relative(int position, int velocity) {
     send_can_write_command({0x60, 0x40}, 0x00, {0x00, 0x5F}, WRITE_BYTES_2); 
 }
 
+void besfoc::CanMotor::get_tourque(int &torque) {
+    if(!initialized){
+        initialize_motor();
+    }
+
+    send_can_read_command({0x60, 0x77}, 0x00, {0x00, 0x00}, torque);
+
+    if(torque > 32767) {
+        torque -= 65536; // Convert to signed 16-bit integer
+    }
+}
+
 void besfoc::CanMotor::set_zero_position(){
     send_can_write_command({0x21, 0x01}, 0x00, {0x00,0x01}, WRITE_BYTES_2);
 }
@@ -344,6 +481,16 @@ void besfoc::CanMotor::set_position_absolute(int position, int velocity) {
         initialize_motor();
     }
 
+    int mode;
+    if(mode != besfoc::POSITION_MODE) {
+
+        if(mode == besfoc::TORQUE_MODE) {
+            reinitialize_motor(); // Disable torque mode before switching to speed mode
+        }
+
+        set_mode(besfoc::POSITION_MODE);
+    }
+
     to_bytes(position, posData);
 
     if(abs(position) > 100000000) {
@@ -357,7 +504,7 @@ void besfoc::CanMotor::set_position_absolute(int position, int velocity) {
     }
 
     send_can_write_command({0x60, 0x81}, 0x00, velData, WRITE_BYTES_4); // Set speed
-    send_can_write_command({0x60, 0xA4}, 0x00, posData, WRITE_BYTES_4); // Set position
+    send_can_write_command({0x60, 0x7A}, 0x00, posData, WRITE_BYTES_4); // Set position
 
     //Start Absolute Positioning Movement
     send_can_write_command({0x60, 0x40}, 0x00, {0x00, 0x0F}, WRITE_BYTES_2);
@@ -365,12 +512,16 @@ void besfoc::CanMotor::set_position_absolute(int position, int velocity) {
 }
 
 void besfoc::CanMotor::set_acceleration(int acceleration) {
+    acc = acceleration;
+
     vector<int> data;
     to_bytes(acceleration, data);
     send_can_write_command({0x60, 0x83}, 0x00, data, WRITE_BYTES_4);
 }
 
 void besfoc::CanMotor::set_deceleration(int deceleration) {
+    dec = deceleration;
+
     vector<int> data;
     to_bytes(deceleration, data);
     send_can_write_command({0x60, 0x84}, 0x00, data, WRITE_BYTES_4);
@@ -394,6 +545,16 @@ void besfoc::CanMotor::stop_motor() {
     send_can_write_command({0x60, 0x40}, 0x00, {0x00, 0x02}, WRITE_BYTES_2); // Start deceleration to stop
 
     initialized=false;
+}
+
+void besfoc::CanMotor::reinitialize_motor() {
+
+    disable_motor(); // Disable the motor
+    std::this_thread::sleep_for(std::chrono::milliseconds(200)); // Wait for 100 milliseconds
+    initialize_motor(); // Re-enable the motor
+
+    set_acceleration(acc); // Restore acceleration
+    set_deceleration(dec); // Restore deceleration
 }
 
 void besfoc::CanMotor::to_bytes(int32_t value, vector<int>& bytes) {
