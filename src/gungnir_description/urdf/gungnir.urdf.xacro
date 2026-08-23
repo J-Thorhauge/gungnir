@@ -41,23 +41,23 @@
 
   <xacro:create_link_no_mesh
       link_name="link_4"
-      xyz_offset="0 0 -.2"
+      xyz_offset="0 0 0"
+      rpy_offset="0 0 0"
+  />
+
+  <xacro:create_link_no_mesh
+      link_name="link_5"
+      xyz_offset="0 0 0"
+      rpy_offset="0 0 0"
+  />
+
+  <xacro:create_link_no_mesh
+      link_name="link_6"
+      xyz_offset="0 0 0."
       rpy_offset="0 0 0"
   />
 <!-- 
-  <xacro:create_link
-      link_name="link_5"
-      xyz_offset="0 0 0.113"
-      rpy_offset="0 0 0"
-  />
-
-  <xacro:create_link
-      link_name="link_6"
-      xyz_offset="0 0 0.086"
-      rpy_offset="0 0 0"
-  /> -->
-
-  <!-- <link name="ft_frame"
+ <link name="ft_frame"
     xyz_offset="0 0 0"
     rpy_offset="0 0 0"
   />
@@ -106,11 +106,10 @@
     <limit effort="1000.0" lower="${-pi}" upper="${pi}" velocity="2.5"/>
   </joint>
 
-  <!-- 
   <joint name="joint_5" type="revolute">
     <parent link="link_4"/>
     <child link="link_5"/>
-    <origin xyz="0.0 0 0.188" rpy="${pi/2} ${pi} ${pi/2}"/>
+    <origin xyz="0 0 ${upperarm_length}" rpy="0 ${pi/2} 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="1000.0" lower="${-pi}" upper="${pi}" velocity="2.5"/>
   </joint>
@@ -118,11 +117,12 @@
   <joint name="joint_6" type="revolute">
     <parent link="link_5"/>
     <child link="link_6"/>
-    <origin xyz="0.0 0 0.246" rpy="0 ${-pi/2} 0"/>
+    <origin xyz="0.0 0 0" rpy="0 ${-pi/2} 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="1000.0" lower="${-pi}" upper="${pi}" velocity="2.5"/>
   </joint>
 
+  <!-- 
   <joint name="joint-ft_frame" type="fixed">
     <parent link="link_6"/>
     <child link="ft_frame"/>

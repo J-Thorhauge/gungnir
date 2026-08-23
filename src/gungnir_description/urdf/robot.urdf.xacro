@@ -6,7 +6,7 @@
   <xacro:include filename="$(find gungnir_description)/urdf/gungnir.ros2_control.xacro"/>
 
   <xacro:property name="upperarm_length" value="0.415"/>
-  <xacro:property name="forearm_length" value="0"/>
+  <xacro:property name="forearm_length" value="0.300"/>
 
   <!-- create link fixed to the "world" -->
   <link name="world"/>

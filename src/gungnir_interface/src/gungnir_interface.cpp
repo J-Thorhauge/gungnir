@@ -38,7 +38,7 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
    //Add the motors and encoders to the hardware maps
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing motors and encoders...");
 
-  
+
   //Joint 2 motor(MyActuator RMD)
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 2");
   auto [rmd_it_2, rmd_inserted_2] = rmd_motors.emplace(1, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_2_CAN_ID));
@@ -48,13 +48,31 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
 
   //Joint 3 motor(MyActuator RMD)
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 3");
-  //Joint 3 motor(MyActuator RMD)
   auto [rmd_it_3, rmd_inserted_3] = rmd_motors.emplace(2, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_3_CAN_ID));
   rmd_it_3->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_ACCELERATION);
   rmd_it_3->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_DECELERATION);
- 
-  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing BesFoc motor and AMT21 encoder for joint 1...");
 
+
+  //Joint 5 motor and Encoder(MyActuator RMD and AMT21)
+  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 5");
+  auto [rmd_it_5, rmd_inserted_5] = rmd_motors.emplace(4, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_5_CAN_ID));
+  rmd_it_5->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_ACCELERATION);
+  rmd_it_5->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_DECELERATION);
+  
+  amt21_encoders.try_emplace(4, AMT21_5_NODE_ADDRESS, "/dev/ttyUSB0", 115200, true);
+  auto encoder_it_5 = amt21_encoders.find(4);
+  encoder_it_5->second.setZero(); // Reset encoder at address 0x58
+
+  //Joint 6 motor and Encoder(MyActuator RMD and AMT21)
+  RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing MyActuator motors for joint 6");
+  auto [rmd_it_6, rmd_inserted_6] = rmd_motors.emplace(5, myactuator_rmd::ActuatorInterface(*my_actuator_bus, MYACTUATOR_6_CAN_ID));
+  rmd_it_6->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_ACCELERATION);
+  rmd_it_6->second.setAcceleration(30000, myactuator_rmd::AccelerationType::VELOCITY_PLANNING_DECELERATION);
+
+  amt21_encoders.try_emplace(5, AMT21_6_NODE_ADDRESS, "/dev/ttyUSB0", 115200, false);
+  auto encoder_it_6 = amt21_encoders.find(5);
+  encoder_it_6->second.setZero(); // Reset encoder at address 0x5C  
+  
   //Joint 1 motor and encoder(BesFoc and AMT21)
   RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Initializing BesFoc motor and AMT21 encoder for joint 1...");
   auto [besfoc_it, besfoc_inserted] = besfoc_motors.emplace(0, besfoc::CanMotor(BESFOC_1_CAN_ID, besfoc_bus));
@@ -65,7 +83,7 @@ CallbackReturn RobotSystem::on_init(const hardware_interface::HardwareInfo & inf
 
   amt21_encoders.try_emplace(0, AMT21_1_NODE_ADDRESS, "/dev/ttyUSB0", 115200, true);
   auto encoder_it = amt21_encoders.find(0);
-  encoder_it->second.setZero(); // Reset encoder at address 0x54
+  encoder_it->second.setZero(); // Reset encoder at address 0x54  
 
 
   //Joint 4 motor, no encoder(BesFoc)
@@ -325,11 +343,44 @@ return_type RobotSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
       RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Sending velocity commandf to motor for joint %zu: %d rpm", i, rpm_command);
       besfoc_it->second.set_velocity(static_cast<int>(rpm_command));
     }else if(my_actuator_it != rmd_motors.end()) {
-      // Send velocity command to the MyActuator RMD motor
-      double velocity_command = (joint_velocities_command_[i]) * (180.0 / M_PI); // Convert rad/s to degrees/s
 
-      RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Sending velocity command to MyActuator for joint %zu: %f rpm", i, velocity_command);
-      my_actuator_it->second.sendVelocitySetpoint(velocity_command);
+      // Send velocity command to the MyActuator RMD motor
+      if(i < 4){
+
+        double velocity_command = (joint_velocities_command_[i]) * (180.0 / M_PI); // Convert rad/s to degrees/s
+
+        RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Sending velocity command to MyActuator for joint %zu: %f rpm", i, velocity_command);
+        my_actuator_it->second.sendVelocitySetpoint(velocity_command);
+
+        continue;
+      }
+
+      // For joints 5 and 6, use differential velocity control
+      double vel5_command = (joint_velocities_command_[4]) * (180.0 / M_PI); // Convert rad/s to degrees/s
+      double vel6_command = (joint_velocities_command_[5]) * (180.0 / M_PI); // Convert rad/s to degrees/s  
+
+      double motor1_velocity = (vel5_command + vel6_command) * MYACTUATOR_5_GEAR_RATIO; // Average velocity for motor 1
+      double motor2_velocity = (vel5_command - vel6_command) * MYACTUATOR_6_GEAR_RATIO; // Differential velocity for motor 2
+
+      // Check if the commanded velocities exceed the maximum limits for either motor
+      if(abs(motor1_velocity) > MYACTUATOR_MAX_VELOCITY || abs(motor2_velocity) > MYACTUATOR_6_MAX_VELOCITY) {
+        RCLCPP_WARN(rclcpp::get_logger("RobotSystem"), "Velocity command exceeds maximum limit for joint %zu. Command: %f, Max: %d, Scaling Down Speeds.", i, motor1_velocity, MYACTUATOR_MAX_VELOCITY);
+        // Scale down the velocities proportionally
+        double scale_factor = std::max(abs(motor1_velocity) / MYACTUATOR_MAX_VELOCITY, abs(motor2_velocity) / MYACTUATOR_6_MAX_VELOCITY);
+        motor1_velocity /= scale_factor;
+        motor2_velocity /= scale_factor;
+      }
+
+      auto my_actuator_it_6 = rmd_motors.find(5);
+      
+      if(my_actuator_it_6 != rmd_motors.end()) {
+        my_actuator_it->second.sendVelocitySetpoint(motor1_velocity);
+        my_actuator_it_6->second.sendVelocitySetpoint(motor2_velocity);
+      } else {
+        RCLCPP_ERROR(rclcpp::get_logger("RobotSystem"), "MyActuator for joint 6 not found. Cannot send velocity command.");
+      }
+
+      i = 5; // Skip the next iteration since we already handled joint 6
     }
   }
 
